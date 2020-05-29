@@ -1,0 +1,344 @@
+##main.tf example##
+## The language used here is HCL(Harshicorp configuration language )
+##Terraform Block###
+terraform {
+  required_version = ">=0.12.0"
+}
+##provider block###
+provider "aws" {
+  version= "~> 2.0"
+  region = "us-east-1"  ##A required configuration
+}
+
+##resources block##
+resource "aws_s3_bucket" "bucket1" {
+  bucket = "bucket1"
+}
+##bucket1 is the name in terraform alone not aws.
+##Data Sources Block##These are objects are managed by terraform
+data "aws_caller_identity" "current" {}
+
+data "aws_availability_zones" "available" {
+state= "available"
+}
+
+output "bucket_info" {
+  value = aws_s3_bucket.bucket1
+}
+
+output "aws_caller_info" {
+  value = data.aws_caller_identity.current ##these are referenced in the main.tf file
+}
+
+output "aws_availability_zones" {
+  value = data.aws_availability_zones.available
+}
+
+#interpolation###
+resource "aws_s3_bucket" "bucket2" {
+  bucket = "${data.aws_caller_identity.current.account_id}-bucket2" ## this will name the buckets created in the fashion as provided
+}
+
+## Handling dependencies##
+##implicit dependency
+resource "aws_s3_bucket" "bucket3" {
+  bucket = "${data.aws_caller_identity.current.account_id}-bucket3" ## this will name the buckets created in the fashion as provided
+  tags = {
+     #implicit dependencies
+     dependency = aws_s3_bucket.bucket2.arn ## this will create s3 bucket 3 before creating s3 bucket 3
+  }
+}
+#Explicit dependency
+resource "aws_s3_bucket" "bucket4" {
+  bucket = "${data.aws_caller_identity.current.account_id}-bucket4" ## this will name the buckets created in the fashion as provided
+#Explicit dependencies
+  depends_on = [
+     aws_s3_bucket.bucket3 ## this will create s3 bucket 3 before creating s3 bucket 4
+  ]
+}
+#configure Terraform to accept inputs##
+#There are three ways to do this
+#1. On the command line
+#2. Put the variables in a file
+#3. As an environmental variables
+# In all this the main.tf should know that there is a variable to be inputed
+variable "bucket_name" {
+  type = "string"
+}
+
+resource "aws_s3_bucket" "bucket5" {
+  bucket = var.bucket_name
+}
+#By this when you run terraform plan -out example.tfplan you will get a prompt to enter the bucket_name
+#Local variables, allows us to assign a name to an expression, we can have multiple blocks with separate names
+locals {
+  aws_account = "${data.aws_caller_identity.current.account_id}-${lower(data.aws_caller_identity.current.user_id)}"
+}
+
+resource "aws_s3_bucket" "bucket6" {
+  bucket = "${local.aws_account}-bucket6"
+}
+## create two s3 bucket or multiple resources using count#
+resource "aws_s3_bucket" "bucketX" {
+  count = 2
+  bucket = "${local.aws_account}-bucket${count.index+7}"
+}
+output "bucketX" {
+  value = aws_s3_bucket.bucketX
+}
+## count=0 is useful for two reasons
+#1. debugging, terraform will delete all those resources count=0 instead of commenting long lines of code
+#2. In conditionals to tell terraform whether to create a resource or interpolation
+
+##to create an array of resources use for_each##
+locals {
+  buckets = {
+    bucket101 = "mybucket101"
+    bucket102 = "mybucket102"
+  }
+}
+
+resource "aws_s3_bucket" "bucketE" {
+  for_each = local.buckets
+  bucket = "${local.aws_account}-${each.value}"
+}
+
+output "bucketE" {
+  value = aws_s3_bucket.bucketX
+}
+##if bucket is a list and not a map#3
+locals {
+  buckets = [
+    "mybucket101"
+    "mybucket102"
+  ]
+}
+
+resource "aws_s3_bucket" "bucketE" {
+  for_each = toset(local.buckets)
+  bucket = "${local.aws_account}-${each.key}"
+}
+
+output "bucketE" {
+  value = aws_s3_bucket.bucketE
+}
+##use count for either you create or delete and use for_each typically for your infrastructure to create multiple resources##
+
+##conditionals##
+variable "bucket_count" {
+  type = number
+}
+
+locals {
+  minimum_number_of_buckets = 5
+  number_of_buckets = var.bucket_count > 0 ? var.bucket_count : local.minimum_number_of_buckets #BUG use max function rather
+  # if bucket_count > 0 then create that number; else create minimum_number_of_buckets which is 5
+}
+## create two s3 bucket or multiple resources using count#
+resource "aws_s3_bucket" "buckets" {
+  count = local.number_of_buckets
+  bucket = "${local.aws_account}-bucket${count.index+7}"
+}
+output "bucketX" {
+  value = aws_s3_bucket.bucketX
+}
+
+##FUNCTIONS##
+##You cannot define your own functions, you have to use the inbuilt terraform FUNCTIONS
+##https://www.terraform.io/docs/configuration/functions.html
+locals {
+  ts = timestamp()  #Returns date and timestamp
+  current_month = formatdate("MMMM", local.ts)
+  tomorrow = formatdate("DD", timeadd(local.ts, "24h"))
+}
+
+output "date_time" {
+  value = "${local.current_month} ${local.tomorrow}"
+}
+
+##ITERATION##
+#HCL has a "for" syntax for iterating over list of values
+locals {
+  l = ["one", "two", "three"]
+  upper_list = [for item in local.l: upper(item)] # go through list and apply upper function on each item, it will output a list
+  upper_map = {for item in local.l: item => upper(item)} # this will output a map
+}
+output "iterations" {
+  value = local.upper_list
+}
+
+##FILTERING##
+# the 'for' can take an 'if' clause
+locals {
+  n = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  evens = [for i in local.n: i if i % 2 == 0]
+}
+output "filtered" {
+  value = local.evens
+}
+
+#Directives and Heredocs
+#Both are string management tool to help get cleaner code
+ ## the minus(-) in front of EOT helps to ignore indentation below the sentence
+output "Heredocs" {
+   value = <<-EOT
+     This is called a 'Heredoc'. It's string literal
+     that can span multiple lines.
+   EOT
+}
+
+
+locals {
+  person = "Abraham Ansah-Cudjoe"
+}
+output "Directives" {
+  value = <<-EOT
+    This is a 'heredoc' with Directives.
+    %{ if local.person == "" }
+    Sorry, I do not know your name.
+    %{ else }
+    Hi ${local.person}
+    %{ endif }
+  EOT
+}
+#We can use this to output in documentation or tell others what is being done here or what to expect.
+
+output "ITERATION" {
+  value = <<-EOT
+  Directives can also iterate...
+  %{ for number in local.evens }
+  ${number} is even.
+  %{ endfor }
+EOT
+}
+
+terraform state list ## to get the state of resources that have been created
+terraform state show 'outputfromstatelist' # to inspect the resource listed
+terraform destroy ## to destroy resources created. Check and confirm before entering yes.
+
+##Terraform Modules##
+Modules are just regular terraform code(HCL) in a folder. Modules can be nested because of the directory structure.
+Visit https://registry.terraform.io to get modules written
+All Terraform is in a Module, the top level module is called the root Module
+When to use MODULES.
+1. When it has already been written use it. NO need to reinvent the wheel.
+2. When you want to add an abstraction.
+3. Missing resources not created by the Cloud provider.
+
+Create Module
+1. naming conversions, this is necessary in order to publishing it on the registry
+terraform-<PROVIDER>-<NAME_OF_MODULE>
+2. Module Layout
+terraform-<PROVIDER>-<NAME>
+- README.md
+- LICENSE
+- main.tf
+- variables.tf
+- modules/ ## these are for submodules
+-- README
+-- LICENSE
+-- main.tf
+-- _
+- examples/
+-- example_1/
+--- main.tf
+- scripts/
+-- datasource.py
+-- resource.py
+Similarities b/n root module and  modules
+1. variables are need to pass parameters.
+2. output to return values
+Differences  b/n root module and  modules
+1. variables without default values are required on modules and TF will not propmt. In root module TF will prompt you to provide it.
+2. In Modules, outputs are not printed to the console or persisted in the state!. It is printed to the root module.
+
+Using a module
+#Local Filesystem
+module "local-module" {
+   source = "/path/to/module"
+}
+#Taking a Module from terraform registry
+module "published-module" {
+   source = "rojopolis/lambda-python-archive"
+}
+#SCM Repo
+module "scm-module"  {
+   source = "github.com/rojopolis/terraform-aws-lambda-python-archive"
+}
+
+###EXAMPLE of module usage###
+module.tf
+variable "string_param" {
+   type = "string"
+   description = "A string"
+   default = "biz"
+}
+
+output "string_output" {
+    description = "The value of the string_param"
+    value = var.string_param
+}
+main.tf
+module "local-module" {
+   source = "/path/to/module"
+   string_param = "foo"
+}
+
+output "module_output" {
+   description = "The output from a module"
+   value = module.local-module.string_output
+}
+
+## COLLABORATION IN TERRAFORM##
+Say three developers are collaborating on the project. One thing they can use is SCM (Gitlab and co).
+Let say developer C makes a plan and an apply and he doesnt have the state file since its on developer A's computer.
+TERRAFORM has a solution called Backend. It is a shared storage media and supports locking.
+
+Configure a Terraform Backend, Backend  providers are different from Cloud providers
+example 1 with aws as backend provider which has it(s3) already
+terraform {
+  required_version = ">= 0.11.8"
+  backend "s3" {
+    bucket         = "rojopolis-tf"
+    key            = "rojopolis-api-deployment"
+    region         = "us-east-1"
+    dynamodb_table = "rojopolis-terraform-lock"
+  }
+}
+#this will store the state file in an S3 bucket, so when another developer makes changes and runs terraform apply,it will consult the state file in S3 .
+this ensures consistency.
+Example 2 with backend as remote, this is used in terraform Cloud
+terraform {
+  required_version = ">= 0.11.8"
+  backend "remote" {
+    hostname     = "app.terraform.io"
+    organization = "rojopolis"
+    workspaces {
+        name = "collaboration"
+    }
+  }
+}
+
+##workspaces##
+Say we have multiple environments (Production and UAT) and we want to use the same configuration file.
+We cannot have the same main.tf since when we run terraform destroy it will destroy everything. workspaces solves this problem.
+It allows us to create a second state file with the same terraform configuration.
+##Creating workspaces##
+terraform workspace show on CLI
+terraform workspace  new AB_Workspace, to create a terraform workspace
+terraform workspace select default , to select the default workspace
+
+this ensures consistency.
+Example 2 with backend as remote, this is used in terraform Cloud
+terraform {
+  required_version = ">= 0.11.8"
+  workspace = "AB_Workspace"
+  backend "remote" {
+    hostname     = "app.terraform.io"
+    organization = "rojopolis"
+  }
+}
+in Case you have a lock, get the lockid and run
+terraform force-unlock lockid  ##confer with your team to ensure no one is doing a plan or apply
+
+##Continuous deployment with TERRAFORM## UNDER TERRAFORM Cloud
